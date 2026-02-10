@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # ── Database ────────────────────────────────────────────────────────────────
+  appointment-db:
+    image: postgres:16-alpine
+    container_name: appointment-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appointment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+      POSTGRES_DB: ${POSTGRES_DB:-appointment}
+    volumes:
+      - appointment_data:/var/lib/postgresql/data
+    networks:
+      - appointment-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appointment} -d ${POSTGRES_DB:-appointment}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend ─────────────────────────────────────────────────────────────────
+  appointment-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: appointment-api
+    restart: unless-stopped
+    depends_on:
+      appointment-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-appointment}:${POSTGRES_PASSWORD}@appointment-db:5432/${POSTGRES_DB:-appointment}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT secret required}
+      PORT: 3001
+      NODE_ENV: production
+    networks:
+      - appointment-network
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.appointment-api.rule=Host(`api.appointment.emreyilmaz.io`)"
+      - "traefik.http.routers.appointment-api.entrypoints=https"
+      - "traefik.http.routers.appointment-api.tls=true"
+      - "traefik.http.routers.appointment-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.appointment-api.loadbalancer.server.port=3001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+  # Frontend Vercel'de olacak, ama burada da build edilebilir. 
+  # Şimdilik API odaklıyız.
+
+volumes:
+  appointment_data:
+
+networks:
+  appointment-network:
+    driver: bridge
+  coolify:
+    external: true
